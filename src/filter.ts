@@ -14,6 +14,16 @@ export interface Filters {
   minSalaryUsd?: number | undefined;
   /** Defaults to true. Set false to drop manager/director/head-of titles. */
   includeManagement?: boolean | undefined;
+  /** Keep roles the company marks remote, or whose location text says "remote". */
+  remoteOnly?: boolean | undefined;
+  /** Keep roles first published within this many days. Roles with no date are dropped when set. */
+  postedWithinDays?: number | undefined;
+  /** Clock for postedWithinDays; injectable for tests. */
+  now?: number | undefined;
+}
+
+export function isRemote(job: Job): boolean {
+  return job.remote === true || /\bremote\b/i.test(job.location);
 }
 
 export function familyMatches(title: string, family: FamilyFilter): boolean {
@@ -33,6 +43,12 @@ export function filterJobs(jobs: Job[], f: Filters): Job[] {
     if (f.includeManagement === false && isManagement(job.title)) return false;
     if (f.location && !matchesLocation(job.location, f.location)) return false;
     if (f.hasPay && job.pay === null) return false;
+    if (f.remoteOnly && !isRemote(job)) return false;
+    if (f.postedWithinDays !== undefined) {
+      const ms = Date.parse(job.publishedAt ?? "");
+      const now = f.now ?? Date.now();
+      if (Number.isNaN(ms) || now - ms > f.postedWithinDays * 86_400_000) return false;
+    }
     if (f.minSalaryUsd !== undefined) {
       const p = job.pay;
       if (!p || !p.annual || p.currency !== "USD" || p.max < f.minSalaryUsd) return false;
@@ -52,4 +68,24 @@ function postedMs(job: Job): number {
 
 export function sortNewest(jobs: Job[]): Job[] {
   return [...jobs].sort((a, b) => postedMs(b) - postedMs(a));
+}
+
+export type SortBy = "newest" | "pay_high" | "company";
+
+function topUsd(job: Job): number {
+  const p = job.pay;
+  return p && p.annual && p.currency === "USD" ? p.max : -1;
+}
+
+/** newest: latest posting first. pay_high: highest published USD top-of-range first, roles without comparable pay last.
+ *  company: A to Z, newest first within a company. Ties always break on newest, then id, so order is stable. */
+export function sortJobs(jobs: Job[], by: SortBy = "newest"): Job[] {
+  const tie = (a: Job, b: Job) => postedMs(b) - postedMs(a) || a.id.localeCompare(b.id);
+  const cmp =
+    by === "pay_high"
+      ? (a: Job, b: Job) => topUsd(b) - topUsd(a) || tie(a, b)
+      : by === "company"
+        ? (a: Job, b: Job) => a.company.localeCompare(b.company) || tie(a, b)
+        : tie;
+  return [...jobs].sort(cmp);
 }

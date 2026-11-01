@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { filterJobs, sortNewest } from "../src/filter.ts";
+import { filterJobs, sortNewest, sortJobs } from "../src/filter.ts";
 import type { Job } from "../src/types.ts";
 
 function job(over: Partial<Job>): Job {
@@ -49,4 +49,40 @@ test("query tokens must all match title, department or company", () => {
 
 test("sortNewest orders by date and puts undated postings last", () => {
   assert.deepEqual(sortNewest(JOBS).map((j) => j.id), ["4", "1", "2", "6", "3", "5"]);
+});
+
+const NOW = Date.parse("2026-11-01T00:00:00Z");
+
+test("remote_only matches the company flag or the word remote in the location", () => {
+  const set = [
+    job({ id: "a", remote: true, location: "San Francisco" }),
+    job({ id: "b", remote: null, location: "Remote - US" }),
+    job({ id: "c", remote: false, location: "New York" }),
+    job({ id: "d", remote: null, location: "Remotely, Texas" }),
+  ];
+  assert.deepEqual(ids(filterJobs(set, { remoteOnly: true })), ["a", "b"]);
+});
+
+test("posted_within_days uses the publish date, drops undated roles, and is inclusive at the edge", () => {
+  const set = [
+    job({ id: "new", publishedAt: "2026-10-30T00:00:00Z" }),
+    job({ id: "edge", publishedAt: "2026-10-02T00:00:00Z" }), // exactly 30 days
+    job({ id: "old", publishedAt: "2026-09-01T00:00:00Z" }),
+    job({ id: "undated", publishedAt: null, updatedAt: "2026-10-31T00:00:00Z" }),
+  ];
+  assert.deepEqual(ids(filterJobs(set, { postedWithinDays: 30, now: NOW })), ["edge", "new"]);
+  assert.equal(filterJobs(set, { now: NOW }).length, 4);
+});
+
+test("sortJobs: newest, pay_high and company are stable and put missing pay last", () => {
+  const set = [
+    job({ id: "1", company: "B", pay: pay(1, 300000), publishedAt: "2026-10-01T00:00:00Z" }),
+    job({ id: "2", company: "A", pay: null, publishedAt: "2026-10-03T00:00:00Z" }),
+    job({ id: "3", company: "A", pay: pay(1, 500000), publishedAt: "2026-10-02T00:00:00Z" }),
+    job({ id: "4", company: "C", pay: { min: 1, max: 900000, currency: "EUR", annual: true }, publishedAt: "2026-10-04T00:00:00Z" }),
+  ];
+  assert.deepEqual(sortJobs(set, "newest").map((j) => j.id), ["4", "2", "3", "1"]);
+  assert.deepEqual(sortJobs(set, "pay_high").map((j) => j.id), ["3", "1", "4", "2"]); // EUR is not comparable, ranks with no-pay by newest
+  assert.deepEqual(sortJobs(set, "company").map((j) => j.id), ["2", "3", "1", "4"]);
+  assert.deepEqual(sortJobs(set, "pay_high").map((j) => j.id), sortJobs([...set].reverse(), "pay_high").map((j) => j.id));
 });

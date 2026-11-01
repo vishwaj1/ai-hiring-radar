@@ -2,7 +2,7 @@ import { MCPServer } from "mcp-use";
 import { z } from "zod";
 import { COMPANIES } from "./companies.ts";
 import { createStore, type LoadResult } from "./store.ts";
-import { filterJobs, sortNewest, type Filters } from "./filter.ts";
+import { filterJobs, sortJobs, sortNewest, type Filters } from "./filter.ts";
 import { buildPayReport } from "./pay.ts";
 import { countSkills, extractSkills, skillsForJob } from "./skills.ts";
 import { scoreMatch } from "./match.ts";
@@ -78,7 +78,8 @@ function toCard(job: Job): Card {
 
 function describeJob(c: Card, n: number): string {
   const noPay = c.source === "greenhouse" ? "pay not in this feed, see posting" : "pay not published";
-  const bits = [c.location, c.pay ?? noPay].join(" · ");
+  const when = c.published ? `posted ${c.published.slice(0, 10)}` : c.updated ? `updated ${c.updated.slice(0, 10)}` : "date not in feed";
+  const bits = [c.location, c.pay ?? noPay, when].join(" · ");
   return `${n}. **${c.company}**: ${c.title} (${bits}) ${c.url}`;
 }
 
@@ -115,6 +116,9 @@ async function load(company?: string): Promise<{ result: LoadResult } | { error:
 const SearchOut = z.object({
   total_matches: z.number().int(),
   returned: z.number().int(),
+  offset: z.number().int(),
+  next_offset: z.number().int().nullable().describe("Pass as `offset` to get the next page. Null when there are no more."),
+  roles_scanned: z.number().int().describe("Open roles read before filtering."),
   jobs: z.array(JobCard),
   data_note: z.string(),
 });
@@ -133,7 +137,11 @@ server.tool(
       has_pay: z.boolean().optional().describe("Only roles where the company published a pay range."),
       min_salary_usd: z.number().int().positive().optional().describe("Only roles whose published USD yearly range reaches at least this figure at the top end."),
       include_management: z.boolean().default(false).describe("Managers, directors and head-of titles are left out by default. Set true to include them."),
-      limit: z.number().int().min(1).max(25).default(10).describe("How many to return."),
+      remote_only: z.boolean().optional().describe("Only roles marked remote by the company or with 'remote' in the location."),
+      posted_within_days: z.number().int().min(1).max(365).optional().describe("Only roles first published in the last N days. Roles with no publish date are dropped."),
+      sort_by: z.enum(["newest", "pay_high", "company"]).default("newest").describe("newest: latest first. pay_high: highest published USD top-of-range first, roles without comparable pay last. company: A to Z."),
+      limit: z.number().int().min(1).max(25).default(10).describe("How many to return per page."),
+      offset: z.number().int().min(0).default(0).describe("Skip this many results. Use next_offset from the previous page."),
     }),
     outputSchema: SearchOut,
     annotations: READ_ONLY,
@@ -148,15 +156,21 @@ server.tool(
       hasPay: input.has_pay,
       minSalaryUsd: input.min_salary_usd,
       includeManagement: input.include_management,
+      remoteOnly: input.remote_only,
+      postedWithinDays: input.posted_within_days,
     };
-    const matches = sortNewest(filterJobs(loaded.result.jobs, filters));
-    const cards = matches.slice(0, input.limit).map(toCard);
+    const matches = sortJobs(filterJobs(loaded.result.jobs, filters), input.sort_by);
+    const scanned = loaded.result.jobs.length;
+    const cards = matches.slice(input.offset, input.offset + input.limit).map(toCard);
+    const end = input.offset + cards.length;
+    const nextOffset = end < matches.length ? end : null;
     const note = dataNote(loaded.result);
+    const order = { newest: "newest first", pay_high: "highest published pay first", company: "A to Z by company" }[input.sort_by];
     const text =
       cards.length === 0
-        ? `No open roles matched. ${note}`
-        : `${matches.length} matching roles (showing ${cards.length}, newest first)\n${cards.map((c, i) => describeJob(c, i + 1)).join("\n")}\n\n${note}`;
-    return ok(text, { total_matches: matches.length, returned: cards.length, jobs: cards, data_note: note });
+        ? `No open roles matched${input.offset > 0 ? " on this page" : ""} (${matches.length} total from ${scanned} open roles scanned). ${note}`
+        : `${matches.length} matching roles out of ${scanned} open roles scanned (showing ${input.offset + 1}-${end}, ${order})\n${cards.map((c, i) => describeJob(c, input.offset + i + 1)).join("\n")}\n${nextOffset === null ? "" : `\nMore results: call again with offset=${nextOffset}.\n`}\n${note}`;
+    return ok(text, { total_matches: matches.length, returned: cards.length, offset: input.offset, next_offset: nextOffset, roles_scanned: scanned, jobs: cards, data_note: note });
   },
 );
 
