@@ -8,7 +8,9 @@ An MCP server that answers **"who is hiring, for what, and at what pay?"** from 
 
 | Tool | Answers |
 |---|---|
-| `search_jobs` | "Which AI startups are hiring forward deployed engineers in SF?" Filters: role type, location, company, has pay, minimum salary. |
+| `search_jobs` | "Which AI startups are hiring forward deployed engineers in SF?" Filters: role type, location, company, pay, remote, posted within N days. Sorts by newest, pay or company, with paging. |
+| `hiring_overview` | "Which companies are hiring the most FDEs in the US?" Ranks companies by open roles, with pay counts and newest posting. |
+| `search_company` | "What is this company hiring for?" Reads any one Ashby or Greenhouse board by name, even if the company is not on the tracked list. |
 | `get_job` | One posting: pay, a short excerpt, skills it mentions, original link. |
 | `compare_pay` | "What do FDE roles pay in New York, and who doesn't publish it?" |
 | `skills_in_demand` | "What do these postings ask for most?" |
@@ -18,7 +20,7 @@ Every result links to the company's own posting. Pay is only ever the range the 
 
 ## Where the data comes from
 
-About 65 companies, read from the public job-board feeds that **Ashby** and **Greenhouse** publish so postings can be shown outside the company's own site. The list is in [`data/companies.json`](data/companies.json); each board was checked live on 2026-11-01.
+About 145 companies, read from the public job-board feeds that **Ashby** and **Greenhouse** publish so postings can be shown outside the company's own site. The list is in [`data/companies.json`](data/companies.json); each board was checked live on 2026-11-01.
 
 - Ashby feeds include structured pay and full descriptions. Greenhouse feeds, as read here, include neither.
 - Results are cached 15 minutes, requests are spaced out and capped, failed boards are reported rather than hidden, and Ashby postings marked unlisted are dropped.

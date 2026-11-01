@@ -28,3 +28,10 @@ Open roles from the public Ashby and Greenhouse job-board feeds of the companies
 - Only the tracked companies are searched. Add one by editing `data/companies.json`.
 - Role family is decided from the title alone.
 - Location matching is text matching, not geography.
+
+## Other tools
+- `hiring_overview`: companies ranked by number of open roles that match a role type, place and optional recency. Same title rules and filters as `search_jobs`; ties break on company name. Shows how many of each company's roles publish pay.
+- `search_company`: reads one Ashby or Greenhouse board by its board name, for companies not in the tracked list. Only the two job-board hosts are contacted, and board names are restricted to letters, digits, dots, dashes and underscores. The feeds do not state the company name, so the user must confirm it is the company they mean. Companies on Lever, Workday and other systems cannot be read.
+
+## Slow starts
+The first search after the server wakes reads every board. If that takes longer than 20 seconds, the reply uses the boards that have answered, says how many are still loading, and those keep loading so a repeat question is complete. Boards that fail are reported by name and retried on the next call.

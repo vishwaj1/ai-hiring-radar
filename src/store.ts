@@ -18,6 +18,8 @@ export interface LoadResult {
   requested: number;
   loaded: number;
   failed: { company: string; error: string }[];
+  /** Boards that had not answered when the deadline passed. They keep loading, so a repeat call is fuller. */
+  pending: string[];
   /** When the oldest board in this result was fetched. Null if none loaded. */
   oldestFetchAt: number | null;
 }
@@ -86,6 +88,13 @@ export function createStore(opts: StoreOptions) {
     if (!cache) {
       cache = new SnapshotCache<Job[]>({ ttlMs: TTL_MS, maxStaleMs: MAX_STALE_MS, now });
       boards.set(key, cache);
+      const limit = opts.companies.length + 60;
+      if (boards.size > limit) {
+        const tracked = new Set(opts.companies.map((t) => `${t.source}:${t.slug}`));
+        for (const k of boards.keys()) {
+          if (!tracked.has(k) && k !== key) { boards.delete(k); break; }
+        }
+      }
     }
     return cache;
   }
@@ -104,22 +113,59 @@ export function createStore(opts: StoreOptions) {
     });
   }
 
-  async function loadJobs(companies: Company[] = opts.companies): Promise<LoadResult> {
-    const settled = await Promise.allSettled(companies.map(loadBoard));
+  async function loadJobs(
+    companies: Company[] = opts.companies,
+    options: { deadlineMs?: number } = {},
+  ): Promise<LoadResult> {
+    type Outcome = { state: "done"; value: Awaited<ReturnType<typeof loadBoard>> } | { state: "failed"; error: string } | { state: "pending" };
+    const outcomes: Outcome[] = companies.map(() => ({ state: "pending" }));
+    const loads = companies.map((c, i) =>
+      loadBoard(c).then(
+        (value) => { outcomes[i] = { state: "done", value }; },
+        (err: unknown) => { outcomes[i] = { state: "failed", error: err instanceof Error ? err.message : String(err) }; },
+      ),
+    );
+    const all = Promise.all(loads);
+    if (options.deadlineMs === undefined) {
+      await all;
+    } else {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<void>((resolve) => { timer = setTimeout(resolve, options.deadlineMs); });
+      await Promise.race([all, deadline]);
+      clearTimeout(timer);
+    }
     const jobs: Job[] = [];
     const failed: LoadResult["failed"] = [];
+    const pending: string[] = [];
     let oldest: number | null = null;
-    settled.forEach((result, i) => {
-      if (result.status === "fulfilled") {
-        jobs.push(...result.value.data);
-        oldest = oldest === null ? result.value.fetchedAt : Math.min(oldest, result.value.fetchedAt);
+    outcomes.forEach((o, i) => {
+      const name = companies[i]?.name ?? "unknown";
+      if (o.state === "done") {
+        jobs.push(...o.value.data);
+        oldest = oldest === null ? o.value.fetchedAt : Math.min(oldest, o.value.fetchedAt);
+      } else if (o.state === "failed") {
+        failed.push({ company: name, error: o.error });
       } else {
-        const name = companies[i]?.name ?? "unknown";
-        const error = result.reason instanceof Error ? result.reason.message : String(result.reason);
-        failed.push({ company: name, error });
+        pending.push(name);
       }
     });
-    return { jobs, requested: companies.length, loaded: companies.length - failed.length, failed, oldestFetchAt: oldest };
+    return { jobs, requested: companies.length, loaded: companies.length - failed.length - pending.length, failed, pending, oldestFetchAt: oldest };
+  }
+
+  /** Read one board that is not in the tracked list. Only the two fixed hosts are ever contacted; the slug is URL-encoded. */
+  async function loadAdhoc(slug: string, source: Source | "auto"): Promise<{ company: Company; jobs: Job[]; fetchedAt: number } | null> {
+    const order: Source[] = source === "auto" ? ["ashby", "greenhouse"] : [source];
+    for (const src of order) {
+      const tracked = opts.companies.find((c) => c.source === src && c.slug.toLowerCase() === slug.toLowerCase());
+      const company: Company = tracked ?? { name: slug, source: src, slug };
+      try {
+        const hit = await loadBoard(company);
+        return { company, jobs: hit.data, fetchedAt: hit.fetchedAt };
+      } catch {
+        // try the next source
+      }
+    }
+    return null;
   }
 
   function companiesMatching(name: string): Company[] {
@@ -156,7 +202,7 @@ export function createStore(opts: StoreOptions) {
     return text;
   }
 
-  return { loadJobs, companiesMatching, findJob, getDescription, companies: opts.companies };
+  return { loadJobs, loadAdhoc, companiesMatching, findJob, getDescription, companies: opts.companies };
 }
 
 export type Store = ReturnType<typeof createStore>;

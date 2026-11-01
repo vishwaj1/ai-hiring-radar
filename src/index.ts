@@ -4,6 +4,7 @@ import { COMPANIES } from "./companies.ts";
 import { createStore, type LoadResult } from "./store.ts";
 import { filterJobs, sortJobs, sortNewest, type Filters } from "./filter.ts";
 import { buildPayReport } from "./pay.ts";
+import { buildHiringOverview } from "./overview.ts";
 import { countSkills, extractSkills, skillsForJob } from "./skills.ts";
 import { scoreMatch } from "./match.ts";
 import { excerpt } from "./text.ts";
@@ -18,7 +19,7 @@ const server = new MCPServer({
     "Open roles at AI and developer-tool companies, read live from their own career pages: search, published pay, skills in demand, and how your background matches.",
   websiteUrl: REPO_URL,
   instructions: [
-    "Use search_jobs to list open roles, get_job for one posting, compare_pay for salaries, skills_in_demand for what employers ask for, and match_me to compare a person's background to open roles.",
+    "Use search_jobs to list open roles, hiring_overview to see which companies are hiring most for a role, search_company to read any one company's board that is not in the tracked list, get_job for one posting, compare_pay for salaries, skills_in_demand for what employers ask for, and match_me to compare a person's background to open roles.",
     "Always give the user the posting `url`. It is the company's own page.",
     "`pay` is the range the company published. Null means not published: never estimate or guess a number.",
     "Companies hosted on Greenhouse expose neither pay nor full descriptions in this feed. Say so when it affects an answer.",
@@ -86,7 +87,13 @@ function describeJob(c: Card, n: number): string {
 function dataNote(r: LoadResult): string {
   const ageMin = r.oldestFetchAt === null ? 0 : Math.max(0, Math.round((Date.now() - r.oldestFetchAt) / 60_000));
   const parts = [`Read live from companies' own career-page feeds (${r.loaded} of ${r.requested} boards, up to ${ageMin} min old)`];
-  if (r.failed.length > 0) parts.push(`could not read: ${r.failed.map((f) => f.company).join(", ")}`);
+  if (r.pending.length > 0) {
+    parts.push(`${r.pending.length} slower board${r.pending.length === 1 ? " is" : "s are"} still loading (${r.pending.slice(0, 6).join(", ")}${r.pending.length > 6 ? ", ..." : ""}), so this list is incomplete: ask again in a moment for the full picture`);
+  }
+  if (r.failed.length > 0) {
+    const names = r.failed.map((f) => f.company);
+    parts.push(`could not read: ${names.slice(0, 8).join(", ")}${names.length > 8 ? ` and ${names.length - 8} more` : ""}`);
+  }
   parts.push("confirm details on the original posting before acting");
   return `${parts.join("; ")}.`;
 }
@@ -99,13 +106,16 @@ const fail = (text: string) => ({ isError: true as const, content: [{ type: "tex
 
 const READ_ONLY = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: true };
 
+/** Answer with what has loaded by this point; slower boards keep loading for the next call. */
+const LOAD_DEADLINE_MS = 20_000;
+
 async function load(company?: string): Promise<{ result: LoadResult } | { error: string }> {
   const targets = company ? store.companiesMatching(company) : store.companies;
   if (targets.length === 0) {
     return { error: `No tracked company matches "${company}". Read the radar://companies resource for the list.` };
   }
-  const result = await store.loadJobs(targets);
-  if (result.loaded === 0) {
+  const result = await store.loadJobs(targets, { deadlineMs: LOAD_DEADLINE_MS });
+  if (result.loaded === 0 && result.pending.length === 0) {
     return { error: `Could not read any career pages right now (${result.failed.map((f) => f.error).join("; ")}). Try again shortly.` };
   }
   return { result };
@@ -128,7 +138,7 @@ server.tool(
     name: "search_jobs",
     title: "Search open roles",
     description:
-      "Find currently open roles at about 65 AI and developer-tool companies, read live from their own career pages. Use for questions like 'who is hiring forward deployed engineers in New York' or 'roles paying over $250K'. Returns newest first, each with the company's original link and its published pay when it has one. Does not apply to jobs.",
+      "Find currently open roles at about 145 AI, developer-tool and infrastructure companies, read live from their own career pages. Use for questions like 'who is hiring forward deployed engineers in New York' or 'roles paying over $250K'. Returns newest first, each with the company's original link and its published pay when it has one. Does not apply to jobs.",
     inputSchema: z.object({
       query: z.string().optional().describe("Words that must all appear in the title, department or company name, e.g. 'infrastructure'."),
       role_family: FamilySchema.default("any"),
@@ -440,6 +450,139 @@ server.tool(
       roles_considered: candidates.length,
       matches: top,
       caveat: MATCH_CAVEAT,
+      data_note: note,
+    });
+  },
+);
+
+// ---------- hiring_overview ----------
+
+const OverviewOut = z.object({
+  companies_with_matches: z.number().int(),
+  roles_matched: z.number().int(),
+  companies: z.array(
+    z.object({
+      company: z.string(),
+      roles: z.number().int(),
+      with_pay: z.number().int().describe("How many of those roles publish a pay range."),
+      newest: z.string().nullable().describe("Date of the most recent matching posting, YYYY-MM-DD."),
+      top_locations: z.array(z.string()),
+      example_title: z.string(),
+      example_url: z.string(),
+    }),
+  ),
+  data_note: z.string(),
+});
+
+server.tool(
+  {
+    name: "hiring_overview",
+    title: "Which companies are hiring most",
+    description:
+      "Rank companies by how many open roles match a role type and place, e.g. 'which companies are hiring the most forward deployed engineers in the US'. Gives counts, how many publish pay, newest posting date, main locations and one example link per company. Use search_jobs to list the roles themselves.",
+    inputSchema: z.object({
+      role_family: FamilySchema.default("fde_or_solutions"),
+      location: LocationSchema,
+      query: z.string().optional().describe("Words that must all appear in the title, department or company name."),
+      include_management: z.boolean().default(false),
+      posted_within_days: z.number().int().min(1).max(365).optional(),
+      limit: z.number().int().min(1).max(30).default(15).describe("How many companies to return."),
+    }),
+    outputSchema: OverviewOut,
+    annotations: READ_ONLY,
+  },
+  async (input) => {
+    const loaded = await load();
+    if ("error" in loaded) return fail(loaded.error);
+    const matches = filterJobs(loaded.result.jobs, {
+      query: input.query,
+      family: input.role_family,
+      location: input.location,
+      includeManagement: input.include_management,
+      postedWithinDays: input.posted_within_days,
+    });
+    const all = buildHiringOverview(matches);
+    const rows = all.slice(0, input.limit);
+    const note = dataNote(loaded.result);
+    const text =
+      rows.length === 0
+        ? `No companies have matching open roles. ${note}`
+        : `${matches.length} matching roles across ${all.length} companies (top ${rows.length} by number of roles)\n` +
+          rows
+            .map(
+              (r, i) =>
+                `${i + 1}. **${r.company}**: ${r.roles} ${r.roles === 1 ? "role" : "roles"}, ${r.with_pay} with published pay, newest ${r.newest ?? "date not in feed"}; ${r.top_locations.join(" / ")}. e.g. ${r.example_title} ${r.example_url}`,
+            )
+            .join("\n") +
+          `\n\n${note}`;
+    return ok(text, { companies_with_matches: all.length, roles_matched: matches.length, companies: rows, data_note: note });
+  },
+);
+
+// ---------- search_company ----------
+
+const SearchCompanyOut = z.object({
+  board: z.string(),
+  source: z.enum(["ashby", "greenhouse"]),
+  tracked: z.boolean().describe("Whether this company is in the tracked list."),
+  total_matches: z.number().int(),
+  open_roles: z.number().int(),
+  jobs: z.array(JobCard),
+  data_note: z.string(),
+});
+
+server.tool(
+  {
+    name: "search_company",
+    title: "Read any one company's job board",
+    description:
+      "Read the open roles of one company that is not in the tracked list, from its public Ashby or Greenhouse job board. Needs the board name, which is usually the company name in lowercase with no spaces (for example 'notion' in jobs.ashbyhq.com/notion). Companies on other systems (Lever, Workday and others) cannot be read. The board name is the only identity check, so make sure it is the company the user means.",
+    inputSchema: z.object({
+      board: z
+        .string()
+        .regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,59}$/, "Board names use letters, digits, dots, dashes and underscores only.")
+        .describe("Board name from the company's careers URL, e.g. 'notion'."),
+      source: z.enum(["auto", "ashby", "greenhouse"]).default("auto").describe("Which job system. auto tries Ashby, then Greenhouse."),
+      role_family: FamilySchema.default("any"),
+      location: LocationSchema,
+      query: z.string().optional().describe("Words that must all appear in the title or department."),
+      include_management: z.boolean().default(false),
+      limit: z.number().int().min(1).max(25).default(10),
+    }),
+    outputSchema: SearchCompanyOut,
+    annotations: READ_ONLY,
+  },
+  async (input) => {
+    const found = await store.loadAdhoc(input.board, input.source);
+    if (!found) {
+      return fail(
+        `No ${input.source === "auto" ? "Ashby or Greenhouse" : input.source} job board is named "${input.board}". Check the name in the company's careers link. Companies on other systems cannot be read here.`,
+      );
+    }
+    const matches = sortJobs(
+      filterJobs(found.jobs, {
+        query: input.query,
+        family: input.role_family,
+        location: input.location,
+        includeManagement: input.include_management,
+      }),
+    );
+    const cards = matches.slice(0, input.limit).map(toCard);
+    const tracked = COMPANIES.some((c) => c.source === found.company.source && c.slug === found.company.slug);
+    const note =
+      `Read live from the ${found.company.source === "ashby" ? "Ashby" : "Greenhouse"} job board named "${found.company.slug}"` +
+      `${tracked ? "" : " (not in the tracked list; this feed does not state the company name, so confirm it is the right company)"}; confirm details on the original posting before acting.`;
+    const text =
+      cards.length === 0
+        ? `No matching roles on this board (${found.jobs.length} open roles in total). ${note}`
+        : `${matches.length} matching roles of ${found.jobs.length} open on "${found.company.slug}" (showing ${cards.length}, newest first)\n${cards.map((c, i) => describeJob(c, i + 1)).join("\n")}\n\n${note}`;
+    return ok(text, {
+      board: found.company.slug,
+      source: found.company.source,
+      tracked,
+      total_matches: matches.length,
+      open_roles: found.jobs.length,
+      jobs: cards,
       data_note: note,
     });
   },

@@ -129,8 +129,53 @@ test("parseJobId", () => {
 });
 
 test("companies.json is well-formed: unique boards, known sources", () => {
-  assert.ok(COMPANIES.length >= 60);
+  assert.ok(COMPANIES.length >= 140);
   const keys = COMPANIES.map((c) => `${c.source}:${c.slug}`);
   assert.equal(new Set(keys).size, keys.length, "duplicate board");
   assert.ok(!COMPANIES.some((c) => /manufact|mcp-use/i.test(c.name)), "Manufact must not be in the demo data");
+});
+
+test("deadline: answers with finished boards, lists slow ones as pending, and they finish for the next call", async () => {
+  const calls: string[] = [];
+  let release!: () => void;
+  const gate = new Promise<void>((r) => { release = r; });
+  const slowFetch = async (input: Parameters<typeof fetch>[0]): Promise<Response> => {
+    const url = String(input);
+    if (url.includes("/anthropic/")) await gate; // Greenhouse board is slow
+    return fakeFetch(calls)(input);
+  };
+  const store = createStore({ companies: [harvey, anthropic], fetchFn: slowFetch, sleep: noSleep, gapMs: 0 });
+  const first = await store.loadJobs(undefined, { deadlineMs: 30 });
+  assert.deepEqual(first.pending, ["Anthropic"]);
+  assert.equal(first.loaded, 1);
+  assert.deepEqual(first.jobs.map((j) => j.id), ["ashby:harvey:a1"]);
+  release();
+  await new Promise((r) => setTimeout(r, 20));
+  const second = await store.loadJobs(undefined, { deadlineMs: 30 });
+  assert.deepEqual(second.pending, []);
+  assert.equal(second.loaded, 2);
+  assert.equal(calls.filter((u) => u.includes("/anthropic/")).length, 1, "slow board fetched once, not restarted");
+});
+
+test("loadAdhoc: auto tries Ashby then Greenhouse, returns null when neither has the board, and reuses tracked entries", async () => {
+  const calls: string[] = [];
+  const store = createStore({ companies: [harvey], fetchFn: fakeFetch(calls), sleep: noSleep, gapMs: 0 });
+  const gh = await store.loadAdhoc("anthropic", "auto");
+  assert.equal(gh?.company.source, "greenhouse");
+  assert.equal(gh?.jobs.length, 1);
+  const tracked = await store.loadAdhoc("HARVEY", "ashby");
+  assert.equal(tracked?.company.name, "Harvey", "tracked company keeps its real name");
+  assert.equal(await store.loadAdhoc("nonexistent-co", "auto"), null);
+  assert.ok(calls.some((u) => u.includes("api.ashbyhq.com") && u.includes("/anthropic")), "Ashby was tried first");
+});
+
+test("loadAdhoc only ever contacts the two fixed hosts, even for hostile board names", async () => {
+  const calls: string[] = [];
+  const store = createStore({ companies: [], fetchFn: fakeFetch(calls), sleep: noSleep, gapMs: 0 });
+  await store.loadAdhoc("../../evil.com/x?y=1#", "auto");
+  for (const u of calls) {
+    const host = new URL(u).host;
+    assert.ok(host === "api.ashbyhq.com" || host === "boards-api.greenhouse.io", `unexpected host ${host}`);
+    assert.ok(!u.includes("evil.com/x"), "slug must be URL-encoded");
+  }
 });
