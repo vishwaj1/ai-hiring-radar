@@ -1,0 +1,17 @@
+{
+  "name": "ai-hiring-radar",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "MCP server that answers 'who is hiring, for what, at what pay?' from AI and dev-tool companies' own public career pages.",
+  "engines": { "node": ">=22.22.2" },
+  "scripts": {
+    "dev": "mcp-use dev",
+    "build": "mcp-use build",
+    "start": "mcp-use start",
+    "typecheck": "tsc --noEmit",
+    "test": "node --test \"test/**/*.test.ts\""
+  },
+  "dependencies": { "mcp-use": "^2.12.2", "zod": "^4.6.6" },
+  "devDependencies": { "@types/node": "^22.20.0", "typescript": "^7.0.2", "vite": "^8.1.6" }
+}
