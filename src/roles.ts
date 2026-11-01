@@ -2,7 +2,9 @@ export type RoleFamily = "forward_deployed" | "solutions" | "other";
 
 // Titles that merely contain "technical account..." (e.g. Technical Accounting Lead)
 // are finance roles, not customer-facing engineering. Found in the first scan.
-const EXCLUDE = /\baccounting\b|\baccountant\b|\brecruit/i;
+// Second scan (live, via a real client): "Field Engineer, Data Center Design" is facilities work and
+// "Technical Enablement Specialist - Field Eng Onboarding" is internal training, not customer deployment.
+const EXCLUDE = /\baccounting\b|\baccountant\b|\brecruit|\bdata cent(?:er|re)\b|\benablement\b/i;
 
 const FORWARD_DEPLOYED = [
   /\bforward[- ]deployed\b/i,

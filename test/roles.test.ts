@@ -16,6 +16,8 @@ const CASES: [string, "forward_deployed" | "solutions" | "other"][] = [
   ["Partner AI Deployment Engineer - AWS", "forward_deployed"],
   ["Manager, AI Deployment Engineering (Southeast Asia)", "forward_deployed"],
   ["Field Engineer, Commercial", "forward_deployed"],
+  ["Field Engineer, Data Center Design and Engineering", "other"],
+  ["Technical Enablement Specialist - Field Eng Onboarding", "other"],
   ["Regional Director, Field Engineering, Healthcare", "forward_deployed"],
   ["Solutions Architect - Australia", "solutions"],
   ["Enterprise Solutions Engineer - Mexico", "solutions"],

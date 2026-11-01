@@ -77,7 +77,8 @@ function toCard(job: Job): Card {
 }
 
 function describeJob(c: Card, n: number): string {
-  const bits = [c.location, c.pay ?? "pay not published"].join(" · ");
+  const noPay = c.source === "greenhouse" ? "pay not in this feed, see posting" : "pay not published";
+  const bits = [c.location, c.pay ?? noPay].join(" · ");
   return `${n}. **${c.company}**: ${c.title} (${bits}) ${c.url}`;
 }
 
@@ -131,7 +132,7 @@ server.tool(
       company: z.string().optional().describe("Only this company (partial name ok), e.g. 'Cursor'."),
       has_pay: z.boolean().optional().describe("Only roles where the company published a pay range."),
       min_salary_usd: z.number().int().positive().optional().describe("Only roles whose published USD yearly range reaches at least this figure at the top end."),
-      include_management: z.boolean().default(true).describe("Set false to drop manager, director and head-of titles."),
+      include_management: z.boolean().default(false).describe("Managers, directors and head-of titles are left out by default. Set true to include them."),
       limit: z.number().int().min(1).max(25).default(10).describe("How many to return."),
     }),
     outputSchema: SearchOut,
@@ -381,7 +382,7 @@ server.tool(
       profile: z.string().min(20).max(8000).describe("The person's resume text or a summary of their skills and experience."),
       role_family: FamilySchema.default("any"),
       location: LocationSchema,
-      include_management: z.boolean().default(true),
+      include_management: z.boolean().default(false),
       limit: z.number().int().min(1).max(10).default(5),
     }),
     outputSchema: MatchOut,
