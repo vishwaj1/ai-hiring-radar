@@ -45,6 +45,38 @@ const LocationSchema = z
     'Where the role is. Free text from each company, so matching is approximate. Accepts "US", "SF", "NYC", "bay area", "London", "EMEA", "APAC", or alternatives with "or". A bare "Remote" is not treated as US.',
   );
 
+// One definition per shared filter, so every tool describes it the same way.
+const QuerySchema = z
+  .string()
+  .optional()
+  .describe(
+    "Keywords. Every word must appear (case-insensitive) in the role's title, department or company name. Job descriptions are not searched. Example: 'infrastructure'.",
+  );
+
+const CompanySchema = z
+  .string()
+  .optional()
+  .describe(
+    "Only this company. Partial, case-insensitive match on the company name, e.g. 'cursor'. A name that matches no tracked company returns an error; use search_company for companies outside the tracked list.",
+  );
+
+const IncludeManagementSchema = z
+  .boolean()
+  .default(false)
+  .describe(
+    "Default false: titles containing manager, director, head of, VP, vice president or chief are left out. Set true to include them.",
+  );
+
+const PostedWithinDaysSchema = z
+  .number()
+  .int()
+  .min(1)
+  .max(365)
+  .optional()
+  .describe(
+    "Only roles first published within this many days. Roles with no publish date are dropped, so the result can be smaller than the number of open roles.",
+  );
+
 const JobCard = z.object({
   id: z.string().describe("Stable id. Pass to get_job."),
   company: z.string(),
@@ -140,15 +172,15 @@ server.tool(
     description:
       "Find currently open roles at about 145 AI, developer-tool and infrastructure companies, read live from their own career pages. Use for questions like 'who is hiring forward deployed engineers in New York' or 'roles paying over $250K'. Returns newest first, each with the company's original link and its published pay when it has one. Does not apply to jobs.",
     inputSchema: z.object({
-      query: z.string().optional().describe("Words that must all appear in the title, department or company name, e.g. 'infrastructure'."),
+      query: QuerySchema,
       role_family: FamilySchema.default("any"),
       location: LocationSchema,
-      company: z.string().optional().describe("Only this company (partial name ok), e.g. 'Cursor'."),
+      company: CompanySchema,
       has_pay: z.boolean().optional().describe("Only roles where the company published a pay range."),
       min_salary_usd: z.number().int().positive().optional().describe("Only roles whose published USD yearly range reaches at least this figure at the top end."),
-      include_management: z.boolean().default(false).describe("Managers, directors and head-of titles are left out by default. Set true to include them."),
+      include_management: IncludeManagementSchema,
       remote_only: z.boolean().optional().describe("Only roles marked remote by the company or with 'remote' in the location."),
-      posted_within_days: z.number().int().min(1).max(365).optional().describe("Only roles first published in the last N days. Roles with no publish date are dropped."),
+      posted_within_days: PostedWithinDaysSchema,
       sort_by: z.enum(["newest", "pay_high", "company"]).default("newest").describe("newest: latest first. pay_high: highest published USD top-of-range first, roles without comparable pay last. company: A to Z."),
       limit: z.number().int().min(1).max(25).default(10).describe("How many to return per page."),
       offset: z.number().int().min(0).default(0).describe("Skip this many results. Use next_offset from the previous page."),
@@ -268,10 +300,10 @@ server.tool(
       "Compare the salary ranges companies have published for a type of role, by company, in US dollars per year. Also lists which matching companies publish no pay at all. Use for 'what do FDE roles pay in New York'. Never estimates: only reports published figures.",
     inputSchema: z.object({
       role_family: FamilySchema.default("forward_deployed"),
-      query: z.string().optional().describe("Extra words that must appear in the title or department."),
+      query: QuerySchema,
       location: LocationSchema,
-      company: z.string().optional().describe("Only this company (partial name ok)."),
-      include_management: z.boolean().default(false).describe("Managers and directors are left out by default because they skew the range."),
+      company: CompanySchema,
+      include_management: IncludeManagementSchema,
     }),
     outputSchema: ComparePayOut,
     annotations: READ_ONLY,
@@ -342,10 +374,10 @@ server.tool(
       "Count which skills, tools and traits appear most often in the descriptions of matching open roles, e.g. what forward deployed engineer postings ask for. Reports how many postings were analysed.",
     inputSchema: z.object({
       role_family: FamilySchema.default("forward_deployed"),
-      query: z.string().optional(),
+      query: QuerySchema,
       location: LocationSchema,
-      company: z.string().optional(),
-      include_management: z.boolean().default(false),
+      company: CompanySchema,
+      include_management: IncludeManagementSchema,
       top_n: z.number().int().min(1).max(25).default(12),
     }),
     outputSchema: SkillsOut,
@@ -406,7 +438,8 @@ server.tool(
       profile: z.string().min(20).max(8000).describe("The person's resume text or a summary of their skills and experience."),
       role_family: FamilySchema.default("any"),
       location: LocationSchema,
-      include_management: z.boolean().default(false),
+      include_management: IncludeManagementSchema,
+      posted_within_days: PostedWithinDaysSchema,
       limit: z.number().int().min(1).max(10).default(5),
     }),
     outputSchema: MatchOut,
@@ -424,6 +457,7 @@ server.tool(
       family: input.role_family,
       location: input.location,
       includeManagement: input.include_management,
+      postedWithinDays: input.posted_within_days,
     }).filter((j) => j.description !== null);
     const ranked = candidates
       .map((job) => ({ job, result: scoreMatch(profile, skillsForJob(job)) }))
@@ -483,9 +517,9 @@ server.tool(
     inputSchema: z.object({
       role_family: FamilySchema.default("fde_or_solutions"),
       location: LocationSchema,
-      query: z.string().optional().describe("Words that must all appear in the title, department or company name."),
-      include_management: z.boolean().default(false),
-      posted_within_days: z.number().int().min(1).max(365).optional(),
+      query: QuerySchema,
+      include_management: IncludeManagementSchema,
+      posted_within_days: PostedWithinDaysSchema,
       limit: z.number().int().min(1).max(30).default(15).describe("How many companies to return."),
     }),
     outputSchema: OverviewOut,
@@ -545,8 +579,8 @@ server.tool(
       source: z.enum(["auto", "ashby", "greenhouse"]).default("auto").describe("Which job system. auto tries Ashby, then Greenhouse."),
       role_family: FamilySchema.default("any"),
       location: LocationSchema,
-      query: z.string().optional().describe("Words that must all appear in the title or department."),
-      include_management: z.boolean().default(false),
+      query: QuerySchema,
+      include_management: IncludeManagementSchema,
       limit: z.number().int().min(1).max(25).default(10),
     }),
     outputSchema: SearchCompanyOut,

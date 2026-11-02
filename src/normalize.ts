@@ -12,6 +12,10 @@ const num = (v: unknown): number | null =>
 /** Descriptions are used for keyword analysis only; cap them to bound memory. */
 const MAX_DESCRIPTION_CHARS = 12_000;
 
+/** No real yearly salary in this data is above this. Bigger figures are things like research grants posted as roles
+ *  (found in a live check: a "$5M" grant ranked as the top-paying job), so they are shown as text but never ranked. */
+const MAX_PLAUSIBLE_ANNUAL_USD = 1_500_000;
+
 export function ashbyPay(compensation: unknown): {
   pay: Pay | null;
   payText: string | null;
@@ -26,8 +30,10 @@ export function ashbyPay(compensation: unknown): {
     const currency = str(c["currencyCode"]);
     if (min === null || max === null || currency === null) continue;
     const interval = str(c["interval"]) ?? "";
+    const annual = /year/i.test(interval);
+    const implausible = annual && currency === "USD" && max > MAX_PLAUSIBLE_ANNUAL_USD;
     return {
-      pay: { min, max, currency, annual: /year/i.test(interval) },
+      pay: implausible ? null : { min, max, currency, annual },
       // Only show the company's wording when we also have a real salary range;
       // "Offers Equity" alone is not pay.
       payText: str(compensation["compensationTierSummary"]),

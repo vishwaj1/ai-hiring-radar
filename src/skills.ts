@@ -41,10 +41,11 @@ const SKILLS: [string, RegExp][] = [
   ["Data pipelines", /data pipelines?|\betl\b|\belt\b/i],
   ["Observability", /\bobservability\b|\bdatadog\b|\bgrafana\b/i],
   ["Security / compliance", /\bsoc ?2\b|\bhipaa\b|\bgdpr\b|\biso 27001\b/i],
-  ["Customer-facing", /customer[- ]facing|client[- ]facing/i],
+  ["Customer-facing", /customer[- ]facing|client[- ]facing|(?:work\w*|partner\w*|collaborat\w*|engag\w*|consult\w*) (?:directly |closely )?with (?:\w+ )?(?:customers|clients)/i],
   ["Enterprise customers", /\benterprise (?:customers?|clients?|sales|deals?|accounts?)\b/i],
   ["Pre-sales / demos", /pre[- ]sales|\bdemos?\b|proof[- ]of[- ]concept|\bpocs?\b/i],
-  ["Implementation / onboarding", /\bimplementation\b|\bonboarding\b|\bdeployment\b/i],
+  // "deployment" alone is left out on purpose: nearly every forward deployed posting says it, so it said nothing.
+  ["Implementation / onboarding", /\bimplementation\b|\bonboarding\b/i],
   ["Solution architecture", /solutions? architect/i],
   ["Stakeholder communication", /stakeholders?|executive presence/i],
   ["Travel", /\btravel(?:l?ing)?\b/i],

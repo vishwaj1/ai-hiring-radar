@@ -54,3 +54,21 @@ test("scoreMatch reports what is covered and what is missing", () => {
   assert.ok(result.score > 0 && result.score < 100);
   assert.equal(scoreMatch(profile, []).score, 0);
 });
+
+test("customer-facing work is recognised from how people actually write it", () => {
+  for (const text of [
+    "Worked directly with customers on onboarding and integrations.",
+    "I partner closely with enterprise clients.",
+    "collaborating with customers to ship",
+    "Customer-facing role",
+    "client facing experience",
+  ]) {
+    assert.ok(extractSkills(text).includes("Customer-facing"), text);
+  }
+  assert.ok(!extractSkills("Customer support tooling for the data team").includes("Customer-facing"));
+});
+
+test("'deployment' alone no longer counts as implementation/onboarding", () => {
+  assert.ok(!extractSkills("Forward Deployed Engineer. Own the deployment of our models.").includes("Implementation / onboarding"));
+  assert.ok(extractSkills("Lead customer onboarding and implementation.").includes("Implementation / onboarding"));
+});

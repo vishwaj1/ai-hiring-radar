@@ -101,3 +101,15 @@ test("garbage input does not throw", () => {
   assert.equal(normalizeAshby(harvey, "x"), null);
   assert.equal(normalizeGreenhouse(anthropic, []), null);
 });
+
+test("a research grant posted as a role ($5M) is shown as text but never ranked as a salary", () => {
+  const comp = {
+    compensationTierSummary: "$5M",
+    summaryComponents: [{ compensationType: "Salary", currencyCode: "USD", interval: "1 YEAR", minValue: 5000000, maxValue: 5000000 }],
+  };
+  const { pay, payText } = ashbyPay(comp);
+  assert.equal(pay, null);
+  assert.equal(payText, "$5M");
+  const real = ashbyPay({ compensationTierSummary: "$380K - $850K", summaryComponents: [{ compensationType: "Salary", currencyCode: "USD", interval: "1 YEAR", minValue: 380000, maxValue: 850000 }] });
+  assert.equal(real.pay?.max, 850000, "a genuine high range is kept");
+});
