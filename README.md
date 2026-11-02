@@ -14,7 +14,7 @@ An MCP server that answers **"who is hiring, for what, and at what pay?"** from 
 | `get_job` | One posting: pay, a short excerpt, skills it mentions, original link. |
 | `compare_pay` | "What do FDE roles pay in New York, and who doesn't publish it?" |
 | `skills_in_demand` | "What do these postings ask for most?" |
-| `match_me` | "Here is my background. Which roles am I closest to and what am I missing?" |
+| `match_me` | "Here is a short summary of my skills. Which roles am I closest to and what am I missing?" Takes a skills summary only (no resume, no contact details); the text is used for this request and not stored. |
 
 Every result links to the company's own posting. Pay is only ever the range the company published; where there is none, the tools say so and never estimate.
 

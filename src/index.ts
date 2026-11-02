@@ -433,9 +433,15 @@ server.tool(
     name: "match_me",
     title: "Match my background",
     description:
-      "Rank open roles by overlap with the user's own background (their resume text or a skills summary) and list what each role asks for that the background does not mention. Use when someone shares their experience and asks which roles fit or what they are missing.",
+      "Rank open roles by keyword overlap with a short summary of the user's skills and experience, and list what each role asks for that the summary does not mention. Ask for a skills summary only, never a full resume or contact details. Use when someone describes their experience and asks which roles fit or what they are missing.",
     inputSchema: z.object({
-      profile: z.string().min(20).max(8000).describe("The person's resume text or a summary of their skills and experience."),
+      profile: z
+        .string()
+        .min(20)
+        .max(3000)
+        .describe(
+          "A short summary of the person's skills, tools and kinds of work, e.g. 'Five years of TypeScript and AWS; built customer-facing integrations'. Leave out name, contact details, addresses and employer names: only skill keywords are used.",
+        ),
       role_family: FamilySchema.default("any"),
       location: LocationSchema,
       include_management: IncludeManagementSchema,

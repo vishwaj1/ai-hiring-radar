@@ -26,3 +26,6 @@ Score 93. ChatGPT-ready and Claude.ai-ready. 20 passed, 11 skipped (no view pane
 - "Customer-facing" missed natural wording: broader pattern, with tests.
 - "Deployment" inflated one skill to 74%: removed.
 - Filter descriptions inconsistent across tools: shared definitions.
+
+## Checklist re-run after the first round of fixes (deployment #7)
+Score 96 (was 93), 21 passed, 1 failed. The filter-description finding is cleared. Remaining: `match_me` invited a full resume, which is more personal data than keyword matching needs (data minimisation). Fix: the input is now a short skills summary of at most 3,000 characters, the description says to leave out name, contact details and employers, and the tool description no longer mentions resumes.
